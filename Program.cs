@@ -23,6 +23,4 @@ public static class Program
         };
         OsuMemory.Run(ref running);
     }
-
-    
 }
