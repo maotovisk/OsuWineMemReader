@@ -24,14 +24,14 @@ public static class OsuMemory
     
     [DllImport("libc", SetLastError = true)]
     private static extern long process_vm_readv(int pid,
-        [In] IoVector[] localIov,
-        ulong liovcnt,
-        [In] IoVector[] remoteIov,
-        ulong riovcnt,
+        [In] IoVector[] localIoVector,
+        ulong localIoVectorLength,
+        [In] IoVector[] remoteIoVector,
+        ulong remoteIoVectorLength,
         ulong flags);
 
     [DllImport("libc", SetLastError = true)]
-    private static extern int kill(int pid, int sig);
+    private static extern int kill(int processId, int signal);
  
     private class VmRegion
     {
@@ -43,8 +43,8 @@ public static class OsuMemory
     [StructLayout(LayoutKind.Sequential)]
     private struct IoVector
     {
-        public IntPtr iov_base;
-        public IntPtr iov_len;
+        public IntPtr IoVectorBase;
+        public IntPtr IoVectorLength;
     }
     
     /// <summary>
@@ -106,8 +106,8 @@ public static class OsuMemory
         var localPtr = Marshal.AllocHGlobal(length);
         try
         {
-            var localIov = new IoVector { iov_base = localPtr, iov_len = new IntPtr(length) };
-            var remoteIov = new IoVector { iov_base = new IntPtr(address), iov_len = new IntPtr(length) };
+            var localIov = new IoVector { IoVectorBase = localPtr, IoVectorLength = new IntPtr(length) };
+            var remoteIov = new IoVector { IoVectorBase = new IntPtr(address), IoVectorLength = new IntPtr(length) };
 
             var result = process_vm_readv(status.OsuPid, [localIov], 1, [remoteIov], 1, 0);
             if (result == -1)
