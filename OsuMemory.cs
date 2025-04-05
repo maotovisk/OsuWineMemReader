@@ -1,0 +1,314 @@
+using System;
+using System.Buffers;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+namespace OsuMemReader;
+
+public static class OsuMemory
+{
+    private const string OsuProcessName = "osu!.exe";
+    private const int PtrSize = 4;
+    private static readonly byte[] OsuBaseSig = [0xf8, 0x01, 0x74, 0x04, 0x83, 0x65];
+    private const int OsuBaseSize = 6;
+    private const int ScanChunkSize = 16 * 1024; // 16KB chunks
+
+    private class SigScanStatus
+    {
+        public int Status { get; set; } = -1;
+        public int OsuPid { get; set; } = -1;
+    }
+
+    private struct VmRegion
+    {
+        public long Start;
+        public long Length;
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern long process_vm_readv(int pid,
+        [In] IoVector[] localIov,
+        ulong liovcnt,
+        [In] IoVector[] remoteIov,
+        ulong riovcnt,
+        ulong flags);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int kill(int pid, int sig);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoVector
+    {
+        public IntPtr iov_base;
+        public IntPtr iov_len;
+    }
+
+
+    static void FindOsuProcess(SigScanStatus status)
+    {
+        if (status.OsuPid > 0 && IsProcessAlive(status.OsuPid))
+        {
+            status.Status = 1;
+            return;
+        }
+
+        foreach (var dir in new DirectoryInfo("/proc").EnumerateDirectories())
+        {
+            if (!int.TryParse(dir.Name, out var pid) || pid <= 0) continue;
+
+            var commPath = Path.Combine(dir.FullName, "comm");
+            if (!File.Exists(commPath)) continue;
+
+            try
+            {
+                if (File.ReadAllText(commPath).Trim() == OsuProcessName)
+                {
+                    status.OsuPid = pid;
+                    status.Status = 2;
+                    Console.WriteLine($"Found PID: {pid}");
+                    return;
+                }
+            }
+            catch (IOException ex)
+            {
+                Console.Error.WriteLine($"Error reading {commPath}: {ex.Message}");
+            }
+        }
+
+        status.Status = -1;
+    }
+
+    private static bool IsProcessAlive(int pid) => kill(pid, 0) == 0;
+
+    private static bool TryReadMemory(SigScanStatus status, long address, byte[] buffer, int length)
+    {
+        if (address == 0) return false;
+
+        var localPtr = Marshal.AllocHGlobal(length);
+        try
+        {
+            var localIov = new IoVector { iov_base = localPtr, iov_len = new IntPtr(length) };
+            var remoteIov = new IoVector { iov_base = new IntPtr(address), iov_len = new IntPtr(length) };
+
+            var result = process_vm_readv(status.OsuPid, [localIov], 1, [remoteIov], 1, 0);
+            if (result == -1)
+            {
+                return false;
+            }
+
+            Marshal.Copy(localPtr, buffer, 0, length);
+            return true;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(localPtr);
+        }
+    }
+
+    private static IEnumerable<VmRegion> EnumerateMemoryRegions(SigScanStatus status)
+    {
+        foreach (var line in File.ReadAllLines($"/proc/{status.OsuPid}/maps"))
+        {
+            var parts = line.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2 || !parts[1].Contains("r")) continue;
+
+            var addresses = parts[0].Split('-');
+            if (addresses.Length != 2) continue;
+
+            yield return new VmRegion
+            {
+                Start = Convert.ToInt64(addresses[0], 16),
+                Length = Convert.ToInt64(addresses[1], 16) - Convert.ToInt64(addresses[0], 16)
+            };
+        }
+    }
+
+    private static bool TryFindPattern(SigScanStatus status, byte[] pattern, int patternSize,
+        out long result)
+    {
+        result = 0;
+        var buffer = ArrayPool<byte>.Shared.Rent(ScanChunkSize + patternSize - 1);
+
+        try
+        {
+            var patternSpan = pattern.AsSpan(0, patternSize);
+
+            foreach (var region in EnumerateMemoryRegions(status))
+            {
+                for (long offset = 0; offset < region.Length; offset += ScanChunkSize)
+                {
+                    var readAddr = region.Start + offset;
+                    var readSize = (int)Math.Min(ScanChunkSize + patternSize - 1, region.Length - offset);
+
+                    if (!TryReadMemory(status, readAddr, buffer, readSize))
+                        continue;
+
+                    var windowSpan = buffer.AsSpan(0, readSize);
+
+                    if (windowSpan.IndexOf(patternSpan) is var index and >= 0)
+                    {
+                        result = readAddr + index;
+                        return true;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return false;
+    }
+
+    static long GetBeatmapPtr(SigScanStatus status, long baseAddress)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(PtrSize);
+        try
+        {
+            if (!TryReadMemory(status, baseAddress - 0xC, buffer, PtrSize))
+                return 0;
+
+            long beatmapPtr = BitConverter.ToInt32(buffer, 0);
+            return TryReadMemory(status, beatmapPtr, buffer, PtrSize) ? BitConverter.ToInt32(buffer, 0) : 0;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static string? GetMapPath(SigScanStatus status, long baseAddress)
+    {
+        var beatmapPtr = GetBeatmapPtr(status, baseAddress);
+        if (beatmapPtr == 0) return null;
+
+        var buffer = ArrayPool<byte>.Shared.Rent(PtrSize);
+        try
+        {
+            if (!TryReadMemory(status, beatmapPtr + 0x78, buffer, PtrSize)) return null;
+            long folderPtr = BitConverter.ToInt32(buffer, 0);
+
+            if (!TryReadMemory(status, beatmapPtr + 0x90, buffer, PtrSize)) return null;
+            long pathPtr = BitConverter.ToInt32(buffer, 0);
+
+            if (!TryReadMemory(status, folderPtr + 4, buffer, 4)) return null;
+            var folderSize = BitConverter.ToInt32(buffer, 0);
+
+            if (!TryReadMemory(status, pathPtr + 4, buffer, 4)) return null;
+            var pathSize = BitConverter.ToInt32(buffer, 0);
+
+            if (folderSize > 256 || pathSize > 256) return null;
+
+            var stringBuffer = ArrayPool<byte>.Shared.Rent(Math.Max(folderSize, pathSize) * 2);
+            try
+            {
+                if (!TryReadMemory(status, folderPtr + 8, stringBuffer, folderSize * 2)) return null;
+                var folder = Encoding.Unicode.GetString(stringBuffer, 0, folderSize * 2);
+
+                if (!TryReadMemory(status, pathPtr + 8, stringBuffer, pathSize * 2)) return null;
+                var path = Encoding.Unicode.GetString(stringBuffer, 0, pathSize * 2);
+
+                var fullPath = $"{folder}/{path}".Replace('\\', '/');
+                return fullPath;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(stringBuffer);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    public static void Run(ref bool running)
+    {
+        var status = new SigScanStatus();
+        long baseAddress = 0;
+        string? oldPath = null;
+        string? songsPath = null;
+        string? winePrefix = null;
+
+        var waitingDisplayed = false;
+
+        while (running)
+        {
+            FindOsuProcess(status);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+
+            if (status.Status < 0 || status.OsuPid <= 0)
+            {
+                if (!waitingDisplayed)
+                {
+                    Console.WriteLine("Waiting for osu!...");
+                    waitingDisplayed = true;
+                }
+
+                baseAddress = 0;
+                Thread.Sleep(300);
+                continue;
+            }
+
+            if (baseAddress == 0)
+            {
+                Console.WriteLine("Starting memory scanning...");
+                winePrefix ??= ProcUtils.GetWinePrefix(status.OsuPid);
+
+                if (winePrefix != null && string.IsNullOrEmpty(songsPath))
+                {
+                    var userId = ProcUtils.GetUserId(status.OsuPid);
+                    songsPath = OsuPath.GetOsuSongsPath(winePrefix, userId ?? "1000");
+                    if (!Directory.Exists(songsPath))
+                    {
+                        Console.WriteLine($"Songs folder not found: {songsPath}");
+                        songsPath = null;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Songs folder found: {songsPath}");
+                    }
+                }
+
+                if (!TryFindPattern(status, OsuBaseSig, OsuBaseSize, out baseAddress))
+                {
+                    Console.WriteLine("Scan failed, retrying...");
+                    Thread.Sleep(3000);
+                    continue;
+                }
+
+                Console.WriteLine($"Base found: 0x{baseAddress:X16}");
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+
+            var songPath = GetMapPath(status, baseAddress);
+            if (songPath != null && songPath != oldPath)
+            {
+                Console.WriteLine($"New beatmap: {songsPath}/{songPath}");
+                try
+                {
+                    File.WriteAllText("/tmp/osu_path", $"0 {songsPath}/{songPath}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"File error: {ex.Message}");
+                }
+
+                oldPath = songPath;
+            }
+            else if (songPath == null)
+            {
+                baseAddress = 0;
+            }
+
+            GC.Collect();
+            Thread.Sleep(300);
+        }
+    }
+}
