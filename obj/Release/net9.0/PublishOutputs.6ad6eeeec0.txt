@@ -1,0 +1,5 @@
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/publish/OsuMemReader
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/publish/OsuMemReader.dll
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/publish/OsuMemReader.deps.json
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/publish/OsuMemReader.runtimeconfig.json
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/publish/OsuMemReader.pdb

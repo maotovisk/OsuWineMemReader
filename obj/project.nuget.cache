@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "Danap7yOiLI=",
+  "success": true,
+  "projectFilePath": "/home/maoto/projects/OsuMemReader/OsuMemReader.csproj",
+  "expectedPackageFiles": [
+    "/home/maoto/.nuget/packages/microsoft.net.illink.tasks/9.0.3/microsoft.net.illink.tasks.9.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}

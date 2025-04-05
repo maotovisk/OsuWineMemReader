@@ -1,0 +1,14 @@
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/OsuMemReader
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/OsuMemReader.deps.json
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/OsuMemReader.runtimeconfig.json
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/OsuMemReader.dll
+/home/maoto/projects/OsuMemReader/bin/Release/net9.0/OsuMemReader.pdb
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/OsuMemReader.GeneratedMSBuildEditorConfig.editorconfig
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/OsuMemReader.AssemblyInfoInputs.cache
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/OsuMemReader.AssemblyInfo.cs
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/OsuMemReader.csproj.CoreCompileInputs.cache
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/OsuMemReader.dll
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/refint/OsuMemReader.dll
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/OsuMemReader.pdb
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/OsuMemReader.genruntimeconfig.cache
+/home/maoto/projects/OsuMemReader/obj/Release/net9.0/ref/OsuMemReader.dll
