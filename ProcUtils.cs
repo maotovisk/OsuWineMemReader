@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace OsuMemReader;
+namespace OsuWineMemReader;
 
 public static class ProcUtils
 {

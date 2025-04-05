@@ -11,5 +11,6 @@
     <NativeAot>true</NativeAot>
     <Nullable>enable</Nullable>
     <PublishSingleFile>true</PublishSingleFile>
+    <RootNamespace>OsuWineMemReader</RootNamespace>
   </PropertyGroup>
 </Project>
