@@ -1,12 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <OutputType>Exe</OutputType>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>link</TrimMode>
     <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
     <IlcDisableReflection>true</IlcDisableReflection>
     <InvariantGlobalization>true</InvariantGlobalization>
     <TargetFramework>net9.0</TargetFramework>
-    <OutputType>exe</OutputType>
+    <NativeAot>true</NativeAot>
+    <!-- Self contained -->
+    <SelfContained>true</SelfContained>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 </Project>

@@ -4,16 +4,17 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Buffers;
 
 namespace OsuMemReader;
 
-public static partial class Program
+public static class Program
 {
     private const string OsuProcessName = "osu!.exe";
-    private const int PtrSize = 4; // int32 (4 bytes)
-
+    private const int PtrSize = 4;
     private static readonly byte[] OsuBaseSig = [0xf8, 0x01, 0x74, 0x04, 0x83, 0x65];
     private const int OsuBaseSize = 6;
+    private const int ScanChunkSize = 16 * 1024; // 16KB chunks
 
     private class SigScanStatus
     {
@@ -59,63 +60,55 @@ public static partial class Program
         {
             e.Cancel = true;
             running = false;
-            Console.WriteLine("Saindo...");
+            Console.WriteLine("Exiting...");
         };
 
         while (running)
         {
             FindOsuProcess(status);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
 
             if (status is { Status: >= 0, OsuPid: > 0 })
             {
                 if (baseAddress == 0)
                 {
                     Console.WriteLine("Starting memory scanning...");
-
                     if (FindPattern(status, OsuBaseSig, OsuBaseSize, null, out baseAddress))
                     {
-                        Console.WriteLine($"Scan successfully concluded. Base: 0x{baseAddress:X16}");
+                        Console.WriteLine($"Base found: 0x{baseAddress:X16}");
                     }
                     else
                     {
-                        Console.WriteLine("Fail during memory scan. Trying again in 3 seconds...");
+                        Console.WriteLine("Scan failed, retrying...");
                         Thread.Sleep(3000);
                         continue;
-                    }
+                    }    
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
                 }
 
                 string? songPath = GetMapPath(status, baseAddress, out var length);
-                if (songPath != null)
+                if (songPath != null && songPath != oldPath)
                 {
-                    if (songPath != oldPath)
-                    {
-                        Console.WriteLine($"Current beatmap: {songPath}");
-
-                        try
-                        {
-                            File.WriteAllText("/tmp/osu_path", $"0 {songPath}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Error on saving temp file: {ex.Message}");
-                        }
-
-                        oldPath = songPath;
-                    }
+                    Console.WriteLine($"New beatmap: {songPath}");
+                    try { File.WriteAllText("/tmp/osu_path", $"0 {songPath}"); }
+                    catch (Exception ex) { Console.WriteLine($"File error: {ex.Message}"); }
+                    oldPath = songPath;
                 }
-                else
+                else if (songPath == null)
                 {
-                    Console.WriteLine("Failure on getting beatmap path. Scanning again...");
                     baseAddress = 0;
                 }
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
             }
             else
             {
-                Console.WriteLine("Waiting for osu! process...");
+                Console.WriteLine("Waiting for osu!...");
                 baseAddress = 0;
             }
-
-            Thread.Sleep(1000);
+            Thread.Sleep(300);
         }
     }
 
@@ -135,290 +128,158 @@ public static partial class Program
                 try
                 {
                     string commPath = Path.Combine(dir.FullName, "comm");
-                    if (File.Exists(commPath))
+                    if (File.Exists(commPath) && File.ReadAllText(commPath).Trim() == OsuProcessName)
                     {
-                        string procName = File.ReadAllText(commPath).Trim();
-                        if (procName == OsuProcessName)
-                        {
-                            status.OsuPid = pid;
-                            status.Status = 2;
-                            Console.WriteLine($"Found osu! process, PID: {pid}");
-                            return;
-                        }
+                        status.OsuPid = pid;
+                        status.Status = 2;
+                        Console.WriteLine($"Found PID: {pid}");
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        return;
                     }
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error while accessing process {pid}: {ex.Message}");
-                }
+                catch { /* Ignore errors */ }
             }
-        }
-
+        }    
         status.Status = -1;
     }
 
-    static bool IsProcessAlive(int pid)
-    {
-        return kill(pid, 0) == 0;
-    }
+    static bool IsProcessAlive(int pid) => kill(pid, 0) == 0;
 
     static bool ReadMemory(SigScanStatus status, long address, byte[] buffer, int length)
     {
-        if (address == 0)
-            return false;
+        if (address == 0) return false;
 
         IntPtr localPtr = Marshal.AllocHGlobal(length);
-
         try
         {
-            var localIov = new IoVector
-            {
-                iov_base = localPtr,
-                iov_len = new IntPtr(length)
-            };
+            var localIov = new IoVector { iov_base = localPtr, iov_len = new IntPtr(length) };
+            var remoteIov = new IoVector { iov_base = new IntPtr(address), iov_len = new IntPtr(length) };
 
-            var remoteIov = new IoVector
-            {
-                iov_base = new IntPtr(address),
-                iov_len = new IntPtr(length)
-            };
-
-            long result = process_vm_readv(status.OsuPid,
-                [localIov],
-                1,
-                [remoteIov],
-                1,
-                0);
-
+            long result = process_vm_readv(status.OsuPid, [localIov], 1, [remoteIov], 1, 0);
             if (result == -1)
             {
-                int errno = Marshal.GetLastWin32Error();
-                Console.WriteLine($"Error while reading memory at address 0x{address:X16}: {errno}");
+                Console.WriteLine($"Read error: {Marshal.GetLastWin32Error()}");
                 return false;
             }
 
             Marshal.Copy(localPtr, buffer, 0, length);
             return true;
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Exception while reading memory: {ex.Message}");
-            return false;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(localPtr);
-        }
+        finally { Marshal.FreeHGlobal(localPtr); }
     }
 
     static IEnumerable<VmRegion> EnumerateMemoryRegions(SigScanStatus status)
     {
-        string mapsPath = $"/proc/{status.OsuPid}/maps";
-
-        string[] lines = File.ReadAllLines(mapsPath);
-
-        foreach (string line in lines)
+        foreach (string line in File.ReadAllLines($"/proc/{status.OsuPid}/maps"))
         {
-            string?[] parts = line.Split([' '], StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2)
-                continue;
+            string[] parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2 || !parts[1].Contains("r")) continue;
 
-            string? perms = null;
-            for (int i = 1; i < parts.Length; i++)
-            {
-                if (parts[i] is { Length: 4 } && parts[i]!.Contains("r"))
-                {
-                    perms = parts[i];
-                    break;
-                }
-            }
-
-            if (perms == null || !perms.Contains("r"))
-                continue;
-
-            string[]? addresses = parts[0]?.Split('-');
-            if (addresses != null && addresses.Length != 2)
-                continue;
-
-            long start = Convert.ToInt32(addresses?[0], 16);
-            long end = Convert.ToInt32(addresses?[1], 16);
-            long length = end - start;
-
-            if (length > 50 * 1024 * 1024)
-                continue;
+            string[] addresses = parts[0].Split('-');
+            if (addresses.Length != 2) continue;
 
             yield return new VmRegion
             {
-                Start = start,
-                Length = length
+                Start = Convert.ToInt64(addresses[0], 16),
+                Length = Convert.ToInt64(addresses[1], 16) - Convert.ToInt64(addresses[0], 16)
             };
         }
     }
 
-    private static bool FindPattern(SigScanStatus status, byte[] pattern, int patternSize, bool[]? mask, out long result)
+    static bool FindPattern(SigScanStatus status, byte[] pattern, int patternSize, bool[]? mask, out long result)
     {
         result = 0;
+        var buffer = ArrayPool<byte>.Shared.Rent(ScanChunkSize + patternSize - 1);
 
-        foreach (var region in EnumerateMemoryRegions(status))
+        try
         {
-            if (region.Length < patternSize)
-                continue;
-
-            try
+            foreach (var region in EnumerateMemoryRegions(status))
             {
-                byte[] buffer = new byte[region.Length];
-                if (!ReadMemory(status, region.Start, buffer, (int)region.Length))
-                    continue;
-
-                for (long i = 0; i <= region.Length - patternSize; i++)
+                for (long offset = 0; offset < region.Length; offset += ScanChunkSize)
                 {
-                    bool match = true;
+                    long readAddr = region.Start + offset;
+                    int readSize = (int)Math.Min(ScanChunkSize + patternSize - 1, region.Length - offset);
 
-                    for (int j = 0; j < patternSize; j++)
+                    if (!ReadMemory(status, readAddr, buffer, readSize)) continue;
+
+                    for (int i = 0; i <= readSize - patternSize; i++)
                     {
-                        if (buffer[i + j] != pattern[j] && (mask == null || !mask[j]))
+                        bool match = true;
+                        for (int j = 0; j < patternSize; j++)
                         {
-                            match = false;
-                            break;
+                            if (buffer[i + j] != pattern[j] && (mask == null || !mask[j]))
+                            {
+                                match = false;
+                                break;
+                            }
                         }
-                    }
-
-                    if (match)
-                    {
-                        result = region.Start + i;
-                        return true;
+                        if (match)
+                        {
+                            result = readAddr + i;
+                            return true;
+                        }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error while scanning region 0x{region.Start:X16}: {ex.Message}");
-            }
         }
-
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
         return false;
     }
 
     static long GetBeatmapPtr(SigScanStatus status, long baseAddress)
     {
-        byte[] buffer = new byte[PtrSize];
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(PtrSize);
+        try
+        {
+            if (!ReadMemory(status, baseAddress - 0xC, buffer, PtrSize))
+                return 0;
 
-        if (baseAddress <= 0xC)
-            return 0;
-
-        if (!ReadMemory(status, baseAddress - 0xC, buffer, PtrSize))
-            return 0;
-
-        long beatmapPtr = BitConverter.ToInt32(buffer, 0);
-
-        if (beatmapPtr <= 0)
-            return 0;
-
-        if (!ReadMemory(status, beatmapPtr, buffer, PtrSize))
-            return 0;
-
-        return BitConverter.ToInt32(buffer, 0);
-    }
-
-    private static int GetMapId(SigScanStatus status, long baseAddress)
-    {
-        long beatmapPtr = GetBeatmapPtr(status, baseAddress);
-        if (beatmapPtr == 0)
-            return -1;
-
-        byte[] buffer = new byte[4];
-        if (!ReadMemory(status, beatmapPtr + 0xC8, buffer, 4))
-            return -1;
-
-        return BitConverter.ToInt32(buffer, 0);
+            long beatmapPtr = BitConverter.ToInt32(buffer, 0);
+            return ReadMemory(status, beatmapPtr, buffer, PtrSize) ? BitConverter.ToInt32(buffer, 0) : 0;
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
     }
 
     private static string? GetMapPath(SigScanStatus status, long baseAddress, out int length)
     {
         length = 0;
         long beatmapPtr = GetBeatmapPtr(status, baseAddress);
-        if (beatmapPtr == 0)
+        if (beatmapPtr == 0) return null;
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(PtrSize);
+        try
         {
-            Console.WriteLine("Invalid beatmap pointer");
-            return null;
+            if (!ReadMemory(status, beatmapPtr + 0x78, buffer, PtrSize)) return null;
+            long folderPtr = BitConverter.ToInt32(buffer, 0);
+        
+            if (!ReadMemory(status, beatmapPtr + 0x90, buffer, PtrSize)) return null;
+            long pathPtr = BitConverter.ToInt32(buffer, 0);
+
+            if (!ReadMemory(status, folderPtr + 4, buffer, 4)) return null;
+            int folderSize = BitConverter.ToInt32(buffer, 0);
+        
+            if (!ReadMemory(status, pathPtr + 4, buffer, 4)) return null;
+            int pathSize = BitConverter.ToInt32(buffer, 0);
+
+            if (folderSize > 256 || pathSize > 256) return null;
+
+            byte[] stringBuffer = ArrayPool<byte>.Shared.Rent(Math.Max(folderSize, pathSize) * 2);
+            try
+            {
+                if (!ReadMemory(status, folderPtr + 8, stringBuffer, folderSize * 2)) return null;
+                string folder = Encoding.Unicode.GetString(stringBuffer, 0, folderSize * 2);
+
+                if (!ReadMemory(status, pathPtr + 8, stringBuffer, pathSize * 2)) return null;
+                string path = Encoding.Unicode.GetString(stringBuffer, 0, pathSize * 2);
+
+                var fullPath = $"{folder}/{path}".Replace('\\', '/');
+                length = fullPath.Length;
+                return fullPath;
+            }
+            finally { ArrayPool<byte>.Shared.Return(stringBuffer); }
         }
-
-        byte[] buffer = new byte[PtrSize];
-
-        if (!ReadMemory(status, beatmapPtr + 0x78, buffer, PtrSize))
-        {
-            Console.WriteLine("Failure to read folder pointer");
-            return null;
-        }
-
-        long folderPtr = BitConverter.ToInt32(buffer, 0);
-        if (folderPtr <= 0)
-        {
-            Console.WriteLine("Invalid folder pointer");
-            return null;
-        }
-
-        // Obter tamanho da pasta
-        byte[] intBuffer = new byte[4];
-        if (!ReadMemory(status, folderPtr + 4, intBuffer, 4))
-        {
-            Console.WriteLine("Falha ao ler tamanho da pasta");
-            return null;
-        }
-
-        int folderSize = BitConverter.ToInt32(intBuffer, 0);
-        if (folderSize <= 0 || folderSize > 1000) // Limite de segurança
-        {
-            Console.WriteLine($"Invalid folder size: {folderSize}");
-            return null;
-        }
-
-        if (!ReadMemory(status, beatmapPtr + 0x90, buffer, PtrSize))
-        {
-            Console.WriteLine("Failure to read path pointer");
-            return null;
-        }
-
-        long pathPtr = BitConverter.ToInt32(buffer, 0);
-        if (pathPtr <= 0)
-        {
-            Console.WriteLine("Invalid path pointer");
-            return null;
-        }
-
-        if (!ReadMemory(status, pathPtr + 4, intBuffer, 4))
-        {
-            Console.WriteLine("Failure to read path size");
-            return null;
-        }
-
-        int pathSize = BitConverter.ToInt32(intBuffer, 0);
-        if (pathSize <= 0 || pathSize > 1000) // Limite de segurança
-        {
-            Console.WriteLine($"Invalid path size: {pathSize}");
-            return null;
-        }
-
-        byte[] folderBuffer = new byte[folderSize * 2];
-        if (!ReadMemory(status, folderPtr + 8, folderBuffer, folderSize * 2))
-        {
-            Console.WriteLine("Failure to read folder data");
-            return null;
-        }
-
-        byte[] pathBuffer = new byte[pathSize * 2];
-        if (!ReadMemory(status, pathPtr + 8, pathBuffer, pathSize * 2))
-        {
-            Console.WriteLine("Failure to read path data");
-            return null;
-        }
-
-        var folder = Encoding.Unicode.GetString(folderBuffer, 0, folderSize * 2);
-        var path = Encoding.Unicode.GetString(pathBuffer, 0, pathSize * 2);
-
-        var fullPath = $"{folder}/{path}".Replace('\\', '/');
-
-        length = fullPath.Length;
-        return fullPath;
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
+        
     }
 }
