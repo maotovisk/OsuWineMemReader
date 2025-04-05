@@ -268,7 +268,7 @@ public static class OsuMemory
     }
 
     /// <summary>
-    /// Runs the memory scanning process for osu!
+    /// Runs the memory scanning process for osu! in a loop.
     /// </summary>
     /// <param name="running">A reference to a boolean indicating whether the process should continue running.</param>
     public static void Run(ref bool running)
