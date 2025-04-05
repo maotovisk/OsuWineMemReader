@@ -9,8 +9,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <TargetFramework>net9.0</TargetFramework>
     <NativeAot>true</NativeAot>
-    <!-- Self contained -->
-    <SelfContained>true</SelfContained>
     <Nullable>enable</Nullable>
+    <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 </Project>
