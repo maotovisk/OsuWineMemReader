@@ -14,20 +14,14 @@ public static class OsuMemory
     private const int PtrSize = 4;
     private static readonly byte[] OsuBaseSig = [0xf8, 0x01, 0x74, 0x04, 0x83, 0x65];
     private const int OsuBaseSize = 6;
-    private const int ScanChunkSize = 16 * 1024; // 16KB chunks
+    private const int ScanChunkSize = 64 * 1024; // 64KB chunks
 
     private class SigScanStatus
     {
         public int Status { get; set; } = -1;
         public int OsuPid { get; set; } = -1;
     }
-
-    private struct VmRegion
-    {
-        public long Start;
-        public long Length;
-    }
-
+    
     [DllImport("libc", SetLastError = true)]
     private static extern long process_vm_readv(int pid,
         [In] IoVector[] localIov,
@@ -38,15 +32,25 @@ public static class OsuMemory
 
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int pid, int sig);
-
+ 
+    private class VmRegion
+    {
+        public long Start;
+        public long Length;
+    }
+    
+    // This one needs to be a struct because C interop
     [StructLayout(LayoutKind.Sequential)]
     private struct IoVector
     {
         public IntPtr iov_base;
         public IntPtr iov_len;
     }
-
-
+    
+    /// <summary>
+    /// Finds the osu! process by checking the /proc filesystem. Write the PID to the status object.
+    /// </summary>
+    /// <param name="status">The status object to update with the found PID.</param>
     static void FindOsuProcess(SigScanStatus status)
     {
         if (status.OsuPid > 0 && IsProcessAlive(status.OsuPid))
@@ -64,13 +68,12 @@ public static class OsuMemory
 
             try
             {
-                if (File.ReadAllText(commPath).Trim() == OsuProcessName)
-                {
-                    status.OsuPid = pid;
-                    status.Status = 2;
-                    Console.WriteLine($"Found PID: {pid}");
-                    return;
-                }
+                if (File.ReadAllText(commPath).Trim() != OsuProcessName) continue;
+                
+                status.OsuPid = pid;
+                status.Status = 2;
+                Console.WriteLine($"Found PID: {pid}");
+                return;
             }
             catch (IOException ex)
             {
@@ -81,8 +84,21 @@ public static class OsuMemory
         status.Status = -1;
     }
 
+    /// <summary>
+    /// Sends a signal 0 to the process with the given PID to check if it's alive.
+    /// </summary>
+    /// <param name="pid"> The PID of the process to check.</param>
+    /// <returns>True if the process is alive, false otherwise.</returns>
     private static bool IsProcessAlive(int pid) => kill(pid, 0) == 0;
 
+    /// <summary>
+    ///  Reads memory from the process with the given PID.
+    /// </summary>
+    /// <param name="status">The status object containing the PID.</param>
+    /// <param name="address">The address to read from.</param>
+    /// <param name="buffer">The buffer to be filled with the read data.</param>
+    /// <param name="length">The length of the buffer.</param>
+    /// <returns>True if the read was successful, false otherwise.</returns>
     private static bool TryReadMemory(SigScanStatus status, long address, byte[] buffer, int length)
     {
         if (address == 0) return false;
@@ -107,7 +123,12 @@ public static class OsuMemory
             Marshal.FreeHGlobal(localPtr);
         }
     }
-
+    
+    /// <summary>
+    /// Scans the memory regions of the osu! process to find all readable memory regions.
+    /// </summary>
+    /// <param name="status">The status object containing the PID.</param>
+    /// <returns>An enumerable collection of memory regions.</returns>
     private static IEnumerable<VmRegion> EnumerateMemoryRegions(SigScanStatus status)
     {
         foreach (var line in File.ReadAllLines($"/proc/{status.OsuPid}/maps"))
@@ -125,7 +146,15 @@ public static class OsuMemory
             };
         }
     }
-
+    
+    /// <summary>
+    /// Tries to find a specific byte pattern in the memory of the osu! process.
+    /// </summary>
+    /// <param name="status">The status object containing the PID.</param>
+    /// <param name="pattern">The byte pattern to search for.</param>
+    /// <param name="patternSize">The size of the byte pattern.</param>
+    /// <param name="result">The address where the pattern was found.</param>
+    /// <returns>True if the pattern was found, false otherwise.</returns>
     private static bool TryFindPattern(SigScanStatus status, byte[] pattern, int patternSize,
         out long result)
     {
@@ -164,7 +193,13 @@ public static class OsuMemory
         return false;
     }
 
-    static long GetBeatmapPtr(SigScanStatus status, long baseAddress)
+    /// <summary>
+    /// Retrieves the pointer to the beatmap structure from the osu! process memory.
+    /// </summary>
+    /// <param name="status">The status object containing the PID.</param>
+    /// <param name="baseAddress">The base address of the osu! process.</param>
+    /// <returns>The pointer to the beatmap structure, or 0 if not found.</returns>
+    private static long GetBeatmapPtr(SigScanStatus status, long baseAddress)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(PtrSize);
         try
@@ -181,6 +216,12 @@ public static class OsuMemory
         }
     }
 
+    /// <summary>
+    /// Retrieves the path of the currently playing beatmap from the osu! process memory.
+    /// </summary>
+    /// <param name="status">The status object containing the PID.</param>
+    /// <param name="baseAddress">The base address of the osu! process.</param>
+    /// <returns>The path of the beatmap, or null if not found.</returns>
     private static string? GetMapPath(SigScanStatus status, long baseAddress)
     {
         var beatmapPtr = GetBeatmapPtr(status, baseAddress);
@@ -226,6 +267,10 @@ public static class OsuMemory
         }
     }
 
+    /// <summary>
+    /// Runs the memory scanning process for osu!
+    /// </summary>
+    /// <param name="running">A reference to a boolean indicating whether the process should continue running.</param>
     public static void Run(ref bool running)
     {
         var status = new SigScanStatus();
@@ -307,8 +352,9 @@ public static class OsuMemory
                 baseAddress = 0;
             }
 
+            GC.WaitForPendingFinalizers();
             GC.Collect();
-            Thread.Sleep(300);
+            Thread.Sleep(500);
         }
     }
 }

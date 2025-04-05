@@ -7,10 +7,7 @@ namespace OsuMemReader;
 public static class OsuPath
 {
     /// <summary>
-    /// Private helper method that mimics the C function try_get_osu_path.
-    /// It reads the given registry file from the Wine prefix and looks for one of the specified subkeys.
-    /// Once a subkey is found, it continues reading until it locates a line containing "osu!.exe",
-    /// then extracts the portion of the line that represents the installation folder.
+    /// Tries to extract the osu! installation path from the Wine registry files.
     /// </summary>
     /// <param name="winePrefix">The Wine prefix directory.</param>
     /// <param name="regFile">The registry file name (e.g., "system.reg").</param>
@@ -62,8 +59,7 @@ public static class OsuPath
     }
 
     /// <summary>
-    /// Retrieves the osu! installation folder by searching the Wine registry files.
-    /// It first tries "system.reg" and, if not found, falls back to "user.reg".
+    /// Returns the osu! installation folder path by searching in the Wine registry files.
     /// </summary>
     /// <param name="winePrefix">The Wine prefix directory.</param>
     /// <returns>The osu! installation folder path or null if not found.</returns>
@@ -80,10 +76,6 @@ public static class OsuPath
 
     /// <summary>
     /// Retrieves the osu! songs folder path.
-    /// It constructs the path to the osu! configuration file using the Wine prefix and UID,
-    /// then reads the config file to extract the "BeatmapDirectory" value.
-    /// Depending on whether the beatmap directory is an absolute or relative path,
-    /// it builds the final songs folder path accordingly.
     /// </summary>
     /// <param name="winePrefix">The Wine prefix directory.</param>
     /// <param name="uid">The UID string of the user running osu!.</param>
