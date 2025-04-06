@@ -8,24 +8,15 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/maotovisk/OsuWineMemReader</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    
+
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <OutputType>Library</OutputType>
-    <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>link</TrimMode>
-    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
-    <IlcDisableReflection>true</IlcDisableReflection>
-    <InvariantGlobalization>true</InvariantGlobalization>
     <TargetFramework>net9.0</TargetFramework>
-    <NativeAot>true</NativeAot>
     <Nullable>enable</Nullable>
     <RootNamespace>OsuWineMemReader</RootNamespace>
   </PropertyGroup>
 
-
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\"/>
   </ItemGroup>
-
-
 </Project>

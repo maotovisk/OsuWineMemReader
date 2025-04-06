@@ -4,7 +4,7 @@ OsuWineMemReader is a library for reading the memory of the osu! process running
 
 This library allows reading the path of the currently playing beatmap in osu!, for now. It was built to be used in a .NET application, more specifically [MapWizard](https://github.com/maotovisk/MapWizard), but it can be used in any .NET application.
 
-It was also heavily inspired by hwsmm's osumem, used in [cosu-trainer](https://github.com/hwsmm/cosu-trainer).
+It was also heavily inspired by hwsmm's `osumem` implementation, used in [cosutrainer](https://github.com/hwsmm/cosutrainer).
 
 > **Note:** This library relies on the `process_vm_readv` function, which can not be available in all Linux distributions.
 > Furthermore, the user running the application must be the same as the user running the osu! process in Wine to it work without issues. If you are using a different user, you will need to run the application with `sudo` or change the permissions of the osu! process.
