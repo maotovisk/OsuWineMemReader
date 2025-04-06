@@ -76,7 +76,7 @@ class Program
 
 ## References
 > This project relied on the heavy lifting of the following projects:
-- [hwsmm](https://github.com/hwsmm) for the `osumem` implementation, which inspired this library.
+- [hwsmm](https://github.com/hwsmm) with the `osumem` implementation, which inspired this library, was the base for the `OsuMemory` class.
 - [OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder).
 
 
