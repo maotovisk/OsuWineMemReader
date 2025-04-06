@@ -20,41 +20,34 @@ public static class OsuPath
 
         try
         {
-            using var file = new StreamReader(regPath);
-            string? result = null;
+            using var fileStream = new FileStream(regPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096);
+            using var reader = new StreamReader(fileStream);
 
-            while (file.ReadLine() is { } line)
+            while (reader.ReadLine() is { } line)
             {
-                foreach (var subkey in subkeys)
+                var matchingSubkey =
+                    subkeys.FirstOrDefault(key => line.Contains(key, StringComparison.OrdinalIgnoreCase));
+                if (matchingSubkey == null) continue;
+
+                while ((line = reader.ReadLine()) != null)
                 {
-                    if (line == null || !line.Contains(subkey, StringComparison.OrdinalIgnoreCase)) continue;
+                    var findIndex = line.IndexOf("osu!.exe", StringComparison.Ordinal);
+                    if (findIndex < 0) continue;
 
-                    while ((line = file.ReadLine()) != null)
-                    {
-                        var findIndex = line.IndexOf("osu!.exe", StringComparison.Ordinal);
-                        if (findIndex < 0) continue;
+                    var pathPart = line[..findIndex];
+                    var firstIndex = pathPart.IndexOf(@":\\", StringComparison.Ordinal);
+                    if (firstIndex < 0) continue;
 
-                        line = line[..findIndex]; // Equivalent to setting '\0' in C
-
-                        var firstIndex = line.IndexOf(@":\\", StringComparison.Ordinal);
-                        if (firstIndex < 0)
-                            return result;
-
-                        var path = line[(firstIndex - 1)..];
-                        result = path;
-                        return result;
-                    }
+                    return pathPart[(firstIndex - 1)..];
                 }
             }
 
-            if (result == null)
-                Debug.WriteLine("Couldn't find song folder!");
-
-            return result;
+            Debug.WriteLine("Couldn't find song folder!");
+            return null;
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(regPath + ": " + ex.Message);
+            Debug.WriteLine($"{regPath}: {ex.Message}");
             return null;
         }
     }
@@ -167,8 +160,9 @@ public static class OsuPath
         {
             result = Path.Combine(basePath, beatmapDir);
         }
+
         var finalPath = TryConvertWinPath(result, basePath.Length + 1);
-        
+
         return finalPath != null ? Path.GetFullPath(finalPath) : null;
     }
 

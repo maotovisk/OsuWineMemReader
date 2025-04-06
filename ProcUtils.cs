@@ -24,9 +24,7 @@ public static class ProcUtils
 
         try
         {
-            var envBytes = File.ReadAllBytes(envPath);
-            var envContent = Encoding.UTF8.GetString(envBytes);
-            var envVars = envContent.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+            var envVars = File.ReadAllText(envPath).Split('\0', StringSplitOptions.RemoveEmptyEntries);
             const string prefixKey = "WINEPREFIX=";
 
             foreach (var env in envVars)
@@ -38,7 +36,7 @@ public static class ProcUtils
                 return winePrefix;
             }
 
-            Debug.WriteLine("WINEPREFIX not found, using default prefix...");
+            Debug.WriteLine("WINEPREFIX not found in env...");
             return null;
         }
         catch (Exception ex)
