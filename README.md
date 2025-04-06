@@ -1,17 +1,22 @@
 # OsuWineMemReader
 
-OsuWineMemReader is a library for reading the memory of the osu! process running in a Wine environment. 
+---
 
-This library allows reading the path of the currently playing beatmap in osu!, for now. It was built to be used in a .NET application, more specifically [MapWizard](https://github.com/maotovisk/MapWizard), but it can be used in any .NET application.
+OsuWineMemReader is a library for reading the memory of the osu! process running in a Wine environment, reading the current selected beatmap path. 
+
+It was built to be used in a .NET application, more specifically [MapWizard](https://github.com/maotovisk/MapWizard), but I decided to make it a standalone library so it can be used in other projects as well.
 
 It was also heavily inspired by hwsmm's `osumem` implementation, used in [cosutrainer](https://github.com/hwsmm/cosutrainer).
 
-> **Note:** This library relies on the `process_vm_readv` function, which can not be available in all Linux distributions.
-> Furthermore, the user running the application must be the same as the user running the osu! process in Wine to it work without issues. If you are using a different user, you will need to run the application with `sudo` or change the permissions of the osu! process.
+> **Note:** This library relies on the `process_vm_readv` function, which can not be available in all Linux distributions. Furthermore, the user running the application must be the same as the user running the osu! process in Wine to it work without issues. If you are using a different user, you will need to run the application with `sudo` or change the permissions of the osu! process.
+
+---
+
 ## Requirements
 
 - .NET 9.0
 - Wine environment configured with osu! installed (check [osu-winello](https://github.com/NelloKudo/osu-winello), if you need help with that).
+- osu! needs to be running with dotnet 4.5 or higher.
 ## Installation
 
 To install the library, add a reference to the `OsuWineMemReader` project in your .NET project.
@@ -22,7 +27,7 @@ You can install the library via NuGet Package Manager Console:
 ```bash
 dotnet add package OsuWineMemReader
 ```
-
+---
 ## Usage
 
 ### Example Usage
@@ -59,6 +64,8 @@ class Program
 - `FilePath`: Path to the file where the beatmap path will be written.
 - `RunOnce`: Indicates whether the reading should be executed only once.
 
+---
+
 ## Contribution
 
 1. Fork the repository.
@@ -66,6 +73,12 @@ class Program
 3. Commit your changes (`git commit -am \`Add new feature\``).
 4. Push to the branch (`git push origin feature/new-feature`).
 5. Create a new Pull Request.
+
+## References
+> This project relied on the heavy lifting of the following projects:
+- [hwsmm](https://github.com/hwsmm) for the `osumem` implementation, which inspired this library.
+- [OsuMemoryDataProvider](https://github.com/Piotrekol/ProcessMemoryDataFinder).
+
 
 ## License
 
