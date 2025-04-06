@@ -300,6 +300,12 @@ public static class OsuMemory
 
             if (status.Status < 0 || status.OsuPid <= 0)
             {
+                if (options.RunOnce && status.Status < 0)
+                {
+                    Debug.WriteLine("osu! process not found.");
+                    throw new Exception("osu! process not found.");
+                }
+                
                 if (!waitingDisplayed)
                 {
                     Debug.WriteLine("Waiting for osu!...");
@@ -324,6 +330,10 @@ public static class OsuMemory
                 if (!TryFindPattern(status, OsuBaseSig, OsuBaseSize, out baseAddress))
                 {
                     Debug.WriteLine("Scan failed, retrying...");
+                    if (options.RunOnce)
+                    {
+                        throw new Exception("Scan failed.");
+                    }
                     Thread.Sleep(3000);
                     continue;
                 }
