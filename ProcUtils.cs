@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 
@@ -17,7 +18,7 @@ public static class ProcUtils
         var envPath = $"/proc/{osuPid}/environ";
         if (!File.Exists(envPath))
         {
-            Console.Error.WriteLine($"File {envPath} not found.");
+            Debug.WriteLine($"File {envPath} not found.");
             return null;
         }
 
@@ -33,16 +34,16 @@ public static class ProcUtils
                 if (!env.StartsWith(prefixKey, StringComparison.Ordinal)) continue;
                 
                 var winePrefix = env[prefixKey.Length..];
-                Console.Error.WriteLine("Found WINEPREFIX: " + winePrefix);
+                Debug.WriteLine("Found WINEPREFIX: " + winePrefix);
                 return winePrefix;
             }
 
-            Console.Error.WriteLine("WINEPREFIX not found, using default prefix...");
+            Debug.WriteLine("WINEPREFIX not found, using default prefix...");
             return null;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("Error reading the environment file: " + ex.Message);
+            Debug.WriteLine("Error reading the environment file: " + ex.Message);
             return null;
         }
     }
@@ -57,7 +58,7 @@ public static class ProcUtils
         var loginUidPath = $"/proc/{pid}/loginuid";
         if (!File.Exists(loginUidPath))
         {
-            Console.Error.WriteLine($"File {loginUidPath} does not exist.");
+            Debug.WriteLine($"File {loginUidPath} does not exist.");
             return null;
         }
 
@@ -68,7 +69,7 @@ public static class ProcUtils
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error reading file {loginUidPath}: {ex.Message}");
+            Debug.WriteLine($"Error reading file {loginUidPath}: {ex.Message}");
             return null;
         }
     }

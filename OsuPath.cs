@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 
@@ -47,13 +48,13 @@ public static class OsuPath
             }
 
             if (result == null)
-                Console.Error.WriteLine("Couldn't find song folder!");
+                Debug.WriteLine("Couldn't find song folder!");
 
             return result;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(regPath + ": " + ex.Message);
+            Debug.WriteLine(regPath + ": " + ex.Message);
             return null;
         }
     }
@@ -84,7 +85,7 @@ public static class OsuPath
     {
         if (!File.Exists("/etc/passwd"))
         {
-            Console.Error.WriteLine("/etc/passwd: File not found. Are you sure you're running this on Linux?");
+            Debug.WriteLine("/etc/passwd: File not found. Are you sure you're running this on Linux?");
             return null;
         }
 
@@ -118,7 +119,6 @@ public static class OsuPath
 
         var unixPath = Path.GetFullPath(basePath);
 
-        // check if the path is a symlink, if so, resolve it
         if (File.Exists(unixPath) || Directory.Exists(unixPath))
         {
             var info = new FileInfo(unixPath);
@@ -135,7 +135,6 @@ public static class OsuPath
         if (convertedCfgPath == null || !File.Exists(convertedCfgPath))
             return null;
 
-        // Find beatmap directory in config file
         string? beatmapDir = null;
         const string marker = "BeatmapDirectory = ";
 
@@ -257,7 +256,7 @@ public static class OsuPath
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"{parentPath}: {ex.Message}");
+                Debug.WriteLine($"{parentPath}: {ex.Message}");
                 return null;
             }
         }

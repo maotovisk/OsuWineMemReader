@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>link</TrimMode>
     <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
@@ -10,7 +10,6 @@
     <TargetFramework>net9.0</TargetFramework>
     <NativeAot>true</NativeAot>
     <Nullable>enable</Nullable>
-    <PublishSingleFile>true</PublishSingleFile>
     <RootNamespace>OsuWineMemReader</RootNamespace>
   </PropertyGroup>
 </Project>

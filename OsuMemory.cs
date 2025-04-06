@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -21,7 +22,7 @@ public static class OsuMemory
         public int Status { get; set; } = -1;
         public int OsuPid { get; set; } = -1;
     }
-    
+
     [DllImport("libc", SetLastError = true)]
     private static extern long process_vm_readv(int pid,
         [In] IoVector[] localIoVector,
@@ -32,13 +33,13 @@ public static class OsuMemory
 
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int processId, int signal);
- 
+
     private class VmRegion
     {
         public long Start;
         public long Length;
     }
-    
+
     // This one needs to be a struct because C interop
     [StructLayout(LayoutKind.Sequential)]
     private struct IoVector
@@ -46,12 +47,19 @@ public static class OsuMemory
         public IntPtr IoVectorBase;
         public IntPtr IoVectorLength;
     }
-    
+
+    public class OsuMemoryOptions
+    {
+        public bool RunOnce { get; set; } = false;
+        public bool WriteToFile { get; set; } = false;
+        public string FilePath { get; set; } = "/tmp/osu_path";
+    }
+
     /// <summary>
     /// Finds the osu! process by checking the /proc filesystem. Write the PID to the status object.
     /// </summary>
     /// <param name="status">The status object to update with the found PID.</param>
-    static void FindOsuProcess(SigScanStatus status)
+    private static void FindOsuProcess(SigScanStatus status)
     {
         if (status.OsuPid > 0 && IsProcessAlive(status.OsuPid))
         {
@@ -69,10 +77,10 @@ public static class OsuMemory
             try
             {
                 if (File.ReadAllText(commPath).Trim() != OsuProcessName) continue;
-                
+
                 status.OsuPid = pid;
                 status.Status = 2;
-                Console.WriteLine($"Found PID: {pid}");
+                Debug.WriteLine($"Found PID: {pid}");
                 return;
             }
             catch (IOException ex)
@@ -123,7 +131,7 @@ public static class OsuMemory
             Marshal.FreeHGlobal(localPtr);
         }
     }
-    
+
     /// <summary>
     /// Scans the memory regions of the osu! process to find all readable memory regions.
     /// </summary>
@@ -146,7 +154,7 @@ public static class OsuMemory
             };
         }
     }
-    
+
     /// <summary>
     /// Tries to find a specific byte pattern in the memory of the osu! process.
     /// </summary>
@@ -271,13 +279,16 @@ public static class OsuMemory
     /// Runs the memory scanning process for osu! in a loop.
     /// </summary>
     /// <param name="running">A reference to a boolean indicating whether the process should continue running.</param>
-    public static void Run(ref bool running)
+    /// <param name="result">The current beatmap path, if any.</param>
+    /// <param name="options">The options for the memory scanning process.</param>
+    public static void StartBeatmapPathReading(ref bool running, out string? result, OsuMemoryOptions options)
     {
         var status = new SigScanStatus();
         long baseAddress = 0;
         string? oldPath = null;
         string? songsPath = null;
         string? winePrefix = null;
+        result = null;
 
         var waitingDisplayed = false;
 
@@ -291,7 +302,7 @@ public static class OsuMemory
             {
                 if (!waitingDisplayed)
                 {
-                    Console.WriteLine("Waiting for osu!...");
+                    Debug.WriteLine("Waiting for osu!...");
                     waitingDisplayed = true;
                 }
 
@@ -302,32 +313,22 @@ public static class OsuMemory
 
             if (baseAddress == 0)
             {
-                Console.WriteLine("Starting memory scanning...");
+                Debug.WriteLine("Starting memory scanning...");
                 winePrefix ??= ProcUtils.GetWinePrefix(status.OsuPid);
 
                 if (winePrefix != null && string.IsNullOrEmpty(songsPath))
                 {
-                    var userId = ProcUtils.GetUserId(status.OsuPid);
-                    songsPath = OsuPath.GetOsuSongsPath(winePrefix, userId ?? "1000");
-                    if (!Directory.Exists(songsPath))
-                    {
-                        Console.WriteLine($"Songs folder not found: {songsPath}");
-                        songsPath = null;
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Songs folder found: {songsPath}");
-                    }
+                    songsPath = GetSongsPath(status, winePrefix);
                 }
 
                 if (!TryFindPattern(status, OsuBaseSig, OsuBaseSize, out baseAddress))
                 {
-                    Console.WriteLine("Scan failed, retrying...");
+                    Debug.WriteLine("Scan failed, retrying...");
                     Thread.Sleep(3000);
                     continue;
                 }
 
-                Console.WriteLine($"Base found: 0x{baseAddress:X16}");
+                Debug.WriteLine($"Base found: 0x{baseAddress:X16}");
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }
@@ -335,26 +336,71 @@ public static class OsuMemory
             var songPath = GetMapPath(status, baseAddress);
             if (songPath != null && songPath != oldPath)
             {
-                Console.WriteLine($"New beatmap: {songsPath}/{songPath}");
-                try
+                Debug.WriteLine($"New beatmap: {songsPath}/{songPath}");
+                if (options.WriteToFile)
                 {
-                    File.WriteAllText("/tmp/osu_path", $"0 {songsPath}/{songPath}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"File error: {ex.Message}");
+                    WriteToFile(options.FilePath, songsPath, songPath);
                 }
 
                 oldPath = songPath;
+                if (options.RunOnce)
+                {
+                    result = $"{songsPath}/{songPath}";
+                    running = false;
+                    break;
+                }
             }
             else if (songPath == null)
             {
                 baseAddress = 0;
             }
 
+            result = songPath;
+
             GC.WaitForPendingFinalizers();
             GC.Collect();
             Thread.Sleep(500);
+        }
+    }
+    
+    /// <summary>
+    /// Gets the path to the osu! songs folder.
+    /// </summary>
+    /// <param name="status">The status object containing the PID.</param>
+    /// <param name="winePrefix">The wine prefix path.</param>
+    /// <returns>The path to the osu! songs folder, or null if not found.</returns>
+    private static string? GetSongsPath(SigScanStatus status, string winePrefix)
+    {
+        var userId = ProcUtils.GetUserId(status.OsuPid);
+        var songsPath = OsuPath.GetOsuSongsPath(winePrefix, userId ?? "1000");
+        if (!Directory.Exists(songsPath))
+        {
+            Debug.WriteLine($"Songs folder not found: {songsPath}");
+            return null;
+        }
+
+        Debug.WriteLine($"Songs folder found: {songsPath}");
+        return songsPath;
+    }
+
+    /// <summary>
+    /// Writes the current beatmap path to a file.
+    /// </summary>
+    /// <param name="filePath">The path to the file where the beatmap path will be written.</param>
+    /// <param name="songsPath">The path to the osu! songs folder.</param>
+    /// <param name="songPath">The path to the current beatmap.</param>
+    private static void WriteToFile(string filePath, string? songsPath, string songPath)
+    {
+        try
+        {
+            if (!Directory.Exists(filePath))
+            {
+                File.WriteAllText(filePath, $"0 {songsPath}/{songPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"File error: {ex.Message}");
         }
     }
 }
